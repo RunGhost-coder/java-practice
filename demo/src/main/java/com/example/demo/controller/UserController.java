@@ -1,5 +1,6 @@
 package com.example.demo.controller;
 import com.example.demo.entity.User;
+import com.example.demo.entity.EsUser;
 import com.example.demo.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -44,6 +45,9 @@ public class UserController {
         return rows > 0 ? "删除成功！" :"删除失败！";
     }
 
-
+    @GetMapping("/search")
+    public List<EsUser> searchUsers(@RequestParam String keyword) {
+        return userService.searchUsers(keyword);
+    }
 
 }

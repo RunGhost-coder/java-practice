@@ -1,8 +1,10 @@
 package com.example.demo.service;
 
+import com.example.demo.entity.EsUser;
 import com.example.demo.entity.User;
 import com.example.demo.entity.UserLog;
 import com.example.demo.mapper.UserMapper;
+import com.example.demo.repository.EsUserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -23,6 +25,8 @@ public class UserService {
     @Autowired
     private LogService logService;
 
+    @Autowired
+    private EsUserRepository esUserRepository;
 
 
     // 缓存 key 前缀
@@ -61,6 +65,13 @@ public class UserService {
     public int createUser(User user) {
         int result = userMapper.insert(user);
         if (result > 0) {
+            // 同步到 Elasticsearch
+            try {
+                EsUser esUser = convertToEsUser(user);
+                esUserRepository.save(esUser);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
             recordLog(user.getId(),"INSERT","新增用户信息为："+user.getId());
         }
         return result;
@@ -72,6 +83,15 @@ public class UserService {
         if (result > 0 && user.getId() != null) {
             String cacheKey = USER_CACHE_KEY_PREFIX + user.getId();
             redisTemplate.delete(cacheKey); // 删除旧缓存
+
+            // 同步更新 Elasticsearch
+            try {
+                EsUser esUser = convertToEsUser(user);
+                esUserRepository.save(esUser);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
             recordLog(user.getId(), "UPDATE", "更新用户信息为: " + user.toString());
         }
         return result;
@@ -80,11 +100,25 @@ public class UserService {
     public int deleteUser(Long id) {
         int result = userMapper.deleteById(id);
         if (result > 0) {
+            //删除Redis 缓存
             String cacheKey = USER_CACHE_KEY_PREFIX + id;
             redisTemplate.delete(cacheKey);
+
+            // 从 Elasticsearch 删除
+            esUserRepository.deleteById(id);
+
             recordLog(id, "DELETE", "删除用户ID: " + id);
         }
         return result;
+    }
+    // ---------- Elasticsearch 搜索 ----------
+    public List<EsUser> searchUsers(String keyword) {
+        // 如果关键词为空，返回所有（或空列表）
+        if (keyword == null || keyword.trim().isEmpty()) {
+            return List.of();
+        }
+        // 根据姓名或邮箱模糊搜索（不分词）
+        return esUserRepository.findByNameOrEmail(keyword, keyword);
     }
 
     private  void recordLog(Long userId, String operation, String details){
@@ -96,4 +130,14 @@ public class UserService {
         logService.saveLog(log);
 
     }
+
+    private EsUser convertToEsUser(User user) {
+        EsUser esUser =new EsUser();
+        esUser.setId(user.getId());
+        esUser.setName(user.getName() == null ? "" : user.getName());
+        esUser.setAge(user.getAge() == null ? 0 : user.getAge());
+        esUser.setEmail(user.getEmail() == null ? "" : user.getEmail());
+        return esUser;
+    }
+
 }
